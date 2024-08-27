@@ -1,0 +1,195 @@
+import 'dart:developer';
+import 'dart:io';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/material.dart';
+
+import '../widgets/user_image.dart';
+
+final _firebase = FirebaseAuth.instance;
+
+class AuthScreen extends StatefulWidget {
+  const AuthScreen({super.key});
+
+  @override
+  State<AuthScreen> createState() => _AuthScreenState();
+}
+
+class _AuthScreenState extends State<AuthScreen> {
+  var _islogin = true;
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  var _enteredEmail = "";
+  var _enteredPassword = "";
+  var _enteredUserName = "";
+  File? _selectedImage;
+  bool _isUpLoading = false;
+
+  void _submit() async {
+    final valid = _formKey.currentState!.validate();
+    if (!valid || (!_islogin && _selectedImage == null)) {
+      return;
+    }
+    try {
+      setState(() {
+        _isUpLoading = true;
+      });
+      if (_islogin) {
+        final UserCredential userCredential =
+            await _firebase.signInWithEmailAndPassword(
+          email: _enteredEmail,
+          password: _enteredPassword,
+        );
+      } else {
+        final UserCredential userCredential =
+            await _firebase.createUserWithEmailAndPassword(
+          email: _enteredEmail,
+          password: _enteredPassword,
+        );
+        final Reference storageRef = FirebaseStorage.instance
+            .ref()
+            .child("user_images")
+            .child("${userCredential.user!.uid}.jpg");
+        await storageRef.putFile(_selectedImage!);
+        final imageUrl = await storageRef.getDownloadURL();
+        log(imageUrl);
+        await FirebaseFirestore.instance
+            .collection("users")
+            .doc(userCredential.user!.uid)
+            .set({
+          "username": _enteredUserName,
+          "email": _enteredEmail,
+          "image_url": imageUrl,
+        });
+      }
+    } on FirebaseAuthException catch (e) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message ?? "Authentication failed"),
+        ),
+      );
+      setState(() {
+        _isUpLoading = false;
+      });
+    }
+    _formKey.currentState!.save();
+    log(_enteredEmail);
+    log(_enteredPassword);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.primary,
+      body: Center(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.only(
+                  top: 30,
+                  bottom: 20,
+                  right: 20,
+                  left: 20,
+                ),
+                width: 200,
+                child: Image.asset("assets/images/chat.png"),
+              ),
+              Card(
+                margin: const EdgeInsets.all(20),
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        children: [
+                          if (!_islogin)
+                            UserImagePicker(
+                              onPickImage: (File pickedImage) {
+                                _selectedImage = pickedImage;
+                              },
+                            ),
+                          TextFormField(
+                            decoration: const InputDecoration(
+                              labelText: "Email Address",
+                            ),
+                            keyboardType: TextInputType.emailAddress,
+                            autocorrect: false,
+                            textCapitalization: TextCapitalization.none,
+                            onSaved: (newValue) => _enteredEmail = newValue!,
+                            validator: (value) {
+                              if (value == null ||
+                                  value.trim().isEmpty ||
+                                  !value.contains("@")) {
+                                return "please enter a valid email address.";
+                              }
+                              return null;
+                            },
+                          ),
+                          TextFormField(
+                            decoration: const InputDecoration(
+                              labelText: "Username",
+                            ),
+                            onSaved: (newValue) => _enteredUserName = newValue!,
+                            validator: (value) {
+                              if (value == null || value.trim().length < 4) {
+                                return "please enter at least 4 characters.";
+                              }
+                              return null;
+                            },
+                          ),
+                          if (!_islogin)
+                            TextFormField(
+                              decoration: const InputDecoration(
+                                labelText: "Password",
+                              ),
+                              obscureText: true,
+                              onSaved: (newValue) =>
+                                  _enteredPassword = newValue!,
+                              validator: (value) {
+                                if (value == null || value.trim().length < 6) {
+                                  return "password must be at least 6 characters long.";
+                                }
+                                return null;
+                              },
+                            ),
+                          const SizedBox(height: 12),
+                          if (_isUpLoading) const CircularProgressIndicator(),
+                          if (!_isUpLoading)
+                            ElevatedButton(
+                              onPressed: _submit,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Theme.of(context)
+                                    .colorScheme
+                                    .primaryContainer,
+                              ),
+                              child: Text(_islogin ? "Login" : "Signup"),
+                            ),
+                          if (!_isUpLoading)
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _islogin = !_islogin;
+                                });
+                              },
+                              child: Text(_islogin
+                                  ? "Create an account"
+                                  : "I already have an account"),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
